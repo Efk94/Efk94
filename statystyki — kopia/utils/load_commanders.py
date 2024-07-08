@@ -1,7 +1,5 @@
-import os
-
 def load_commanders():
-    avatar_folder = r'C:\Users\profo\OneDrive\Pulpit\Nowy folder\Avatar'
+    avatar_folder = os.path.join(os.path.dirname(__file__), 'Avatar')  # Użyj względnej ścieżki
     commanders = {}
     for filename in os.listdir(avatar_folder):
         name, _ = os.path.splitext(filename)
