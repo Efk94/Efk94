@@ -30,8 +30,8 @@ intents.message_content = True
 # Inicjalizacja bota
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# Ścieżka do pliku Excel - upewnij się, że ścieżka jest poprawna
-file_path = 'C:\\Users\\profo\\OneDrive\\Pulpit\\statystyki — kopia\\2732 statystyki (4).xlsx'
+# Ścieżka względna do pliku Excel w katalogu projektu
+file_path = os.path.join(os.path.dirname(__file__), '2732 statystyki (4).xlsx')
 excel_data = pd.read_excel(file_path, engine='openpyxl')
 
 # Check column names
