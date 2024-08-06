@@ -30,18 +30,41 @@ intents.message_content = True
 # Inicjalizacja bota
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# Ścieżka względna do pliku Excel w katalogu projektu
-file_path = os.path.join(os.path.dirname(__file__), '2732 statystyki (4).xlsx')
-excel_data = pd.read_excel(file_path, engine='openpyxl')
-
-# Check column names
-print(excel_data.columns)
-
-kvk_stats = KvkStats(file_path)
+# Wczytanie danych z pliku Excel
+file_path = 'C:\\Users\\profo\\OneDrive\\Pulpit\\statystyki — kopia\\2732 statystyki (4).xlsx'
+before_kvk = pd.read_excel(file_path, sheet_name='Przed', engine='openpyxl')
+after_kvk = pd.read_excel(file_path, sheet_name='Po', engine='openpyxl')
 
 # Ścieżka do pliku z przypisaniami
 assignments_file = 'assignments.json'
 links_file = 'links.json'
+
+def calculate_difference(before_df, after_df, gov_id):
+    before_stats = before_df[before_df['GOVERNOR ID'] == gov_id]
+    after_stats = after_df[after_df['GOVERNOR ID'] == gov_id]
+    
+    if before_stats.empty or after_stats.empty:
+        raise ValueError(f"Nie znaleziono statystyk dla GOV ID: {gov_id}")
+    
+    before_stats = before_stats.iloc[0]
+    after_stats = after_stats.iloc[0]
+    
+    kills_diff = after_stats['TOTAL KILLS'] - before_stats['TOTAL KILLS']
+    deaths_diff = after_stats['DEADS'] - before_stats['DEADS']
+    return kills_diff, deaths_diff
+
+def create_progress_bar(current, target):
+    current = int(current)
+    target = int(target)
+    bar = progressBar.filledBar(target, current, size=20)
+    percentage = round((current / target) * 100, 2)  # Zaokrąglenie do dwóch miejsc po przecinku
+    return bar, percentage
+
+
+# Check column names
+print(before_kvk.columns)
+
+kvk_stats = KvkStats(file_path)
 
 # Załaduj dowódców
 def load_commanders():
@@ -174,10 +197,6 @@ def get_linked_gov_id(user_id):
 
     return links.get(user_id)
 
-@bot.event
-async def on_ready():
-    print(f'{bot.user} has connected to Discord!')
-
 @bot.command(name='stats')
 async def stats(ctx, gov_id: int = None):
     if gov_id is None:
@@ -186,36 +205,58 @@ async def stats(ctx, gov_id: int = None):
             await ctx.send("Nie masz przypisanego `gov_id`. Użyj komendy `!link <gov_id>`, aby przypisać swoje `gov_id`.")
             return
 
-    player_stats = excel_data[excel_data['GOVERNOR ID'] == gov_id]
-    if not player_stats.empty:
-        player_stats = player_stats.iloc[0]
+    player_stats_before = before_kvk[before_kvk['GOVERNOR ID'] == gov_id]
+    player_stats_after = after_kvk[after_kvk['GOVERNOR ID'] == gov_id]
+    
+    if not player_stats_before.empty and not player_stats_after.empty:
+        player_stats_before = player_stats_before.iloc[0]
+        player_stats_after = player_stats_after.iloc[0]
+        
+        power_before = player_stats_before['POWER']
+        power_after = player_stats_after['POWER']
+        power_diff = power_after - power_before
 
         embed = discord.Embed(color=0xf56754)
-        embed.title = f"📊 Statystyki osobiste dla {player_stats['USERNAME']}"
+        embed.title = f"📊 Statystyki osobiste dla {player_stats_after['USERNAME']}"
         embed.set_author(name="2732bot", url="https://lookerstudio.google.com/u/0/reporting/a5831fbc-65a0-4b7a-9213-00beb671ca79/page/p_q674h2m68c",
                          icon_url="https://cdn.discordapp.com/attachments/1237356214099247145/1258308083369902140/tawy.png?ex=66879239&is=668640b9&hm=4e6d5a5f77157b35e08e97bc8d043bf8fd202f09cc4adad6993ad0b216199617&")
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
 
         # Dodanie pól sekcji
+        embed.add_field(name="💪 Siła przed KvK", value=f"{power_before:,}", inline=False)
+        embed.add_field(name="💪 Siła", value=f"{power_after:,}", inline=False)
         
-        embed.add_field(name="💪 Siła", value=f"{player_stats['POWER']:,}", inline=False)
-        embed.add_field(name="🔫 Łączna liczba zabójstw", value=f"{player_stats['TOTAL KILLS']:,}", inline=False)
-        embed.add_field(name="💀 Zgony", value=f"{player_stats['DEADS']:,}", inline=False)
+        if power_diff >= 0:
+            embed.add_field(name="🔼 Zmiana siły", value=f"+{power_diff:,}", inline=False)
+        else:
+            embed.add_field(name="🔽 Zmiana siły", value=f"{power_diff:,}", inline=False)
+
+        embed.add_field(name="🔫 Łączna liczba zabójstw", value=f"{player_stats_after['TOTAL KILLS']:,}", inline=False)
         
-        # Dodanie przypisanych dowódców do embedu
+        # Obliczanie różnicy w zabójstwach
+        kills_diff, deaths_diff = calculate_difference(before_kvk, after_kvk, gov_id)
+        
+        # Tworzenie pasków postępu dla zabójstw
+        killsbar, kills_percentage = create_progress_bar(kills_diff, player_stats_after.get('KVK Kills Target', kills_diff))
+        
+        # Dodanie pola z paskiem postępu do embedu
+        embed.add_field(name=":crossed_swords: AKTUALNE ZABÓJSTWA",
+                        value=f"{kills_diff} | {killsbar[0]} {kills_percentage:.2f}%", inline=False)
+
         assigned_commanders = get_assigned_commanders(str(ctx.author.id))
         if assigned_commanders:
             commander_icons = ' '.join([str(discord.utils.get(ctx.guild.emojis, name=cmd)) for cmd in assigned_commanders])
-            embed.add_field(name="🛡️Dowódcy", value=commander_icons, inline=False)
+            embed.add_field(name="🛡️ Dowódcy", value=commander_icons, inline=False)
 
-        embed.add_field(name="📌 Grupa", value=player_stats['GROUP'], inline=False)
-        embed.add_field(name="🎯 Cel zabójstw KVK", value=f"{player_stats.get('KVK Kills Target', 'N/A'):,}", inline=False)
-        embed.add_field(name="🏅 Cel DKP", value=f"{player_stats.get('DKP Traget', 'N/A'):,}", inline=False)
+        embed.add_field(name="📌 Grupa", value=player_stats_after['GROUP'], inline=False)
+        embed.add_field(name="🎯 Cel zabójstw KVK", value=f"{player_stats_after.get('KVK Kills Target', 'N/A'):,}", inline=False)
+        embed.add_field(name="🏅 Cel DKP", value=f"{player_stats_after.get('DKP Traget', 'N/A'):,}", inline=False)
         embed.set_footer(text=f"Na wniosek @{ctx.author.name}", icon_url=ctx.author.display_avatar.url)
 
         await ctx.send(embed=embed)
     else:
         await ctx.send("Nie znaleziono statystyk dla podanego ID.")
+
 
 @bot.command(name='link')
 async def link(ctx, gov_id: int):
